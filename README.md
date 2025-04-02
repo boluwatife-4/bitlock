@@ -1,7 +1,5 @@
 # BitLock USDA Protocol
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-
 A decentralized finance protocol enabling Bitcoin-backed stablecoin issuance on Stacks L2. Implements secure vault management, collateralized debt positions, and decentralized governance mechanisms compliant with Bitcoin's security model.
 
 ## Table of Contents
