@@ -241,3 +241,72 @@
       
       (ok true))))
 
+;; Repay debt
+(define-public (repay-debt (vault-id uint) (amount uint))
+  (let (
+    (vault (unwrap! (map-get? vaults vault-id) (err ERR_VAULT_NOT_FOUND)))
+    (sender tx-sender)
+    (debt (get debt vault))
+  )
+    (asserts! (not (get liquidated vault)) (err ERR_ALREADY_LIQUIDATED))
+    (asserts! (<= amount debt) (err ERR_INVALID_AMOUNT))
+    (asserts! (> amount u0) (err ERR_INVALID_AMOUNT))
+    
+    ;; Burn stablecoins from sender
+    (try! (ft-burn? usda amount sender))
+    
+    ;; Update vault
+    (map-set vaults vault-id {
+      owner: (get owner vault),
+      collateral: (get collateral vault),
+      debt: (- debt amount),
+      last-update: block-height,
+      liquidated: false
+    })
+    
+    ;; Update total debt
+    (var-set total-debt (- (var-get total-debt) amount))
+    
+    (ok true)))
+
+;; Withdraw collateral
+(define-public (withdraw-collateral (vault-id uint) (amount uint))
+  (let (
+    (vault (unwrap! (map-get? vaults vault-id) (err ERR_VAULT_NOT_FOUND)))
+    (sender tx-sender)
+    (current-collateral (get collateral vault))
+    (debt (get debt vault))
+    (btc-price (unwrap! (get-btc-price) (err ERR_ORACLE_FAILURE)))
+  )
+    (asserts! (not (var-get system-paused)) (err ERR_SYSTEM_PAUSED))
+    (asserts! (is-eq sender (get owner vault)) (err ERR_UNAUTHORIZED))
+    (asserts! (not (get liquidated vault)) (err ERR_ALREADY_LIQUIDATED))
+    (asserts! (<= amount current-collateral) (err ERR_INSUFFICIENT_COLLATERAL))
+    (asserts! (> amount u0) (err ERR_INVALID_AMOUNT))
+    
+    ;; Calculate new collateral amount
+    (let (
+      (new-collateral (- current-collateral amount))
+      (new-collateral-value-usd (* new-collateral btc-price))
+    )
+      ;; Check if debt exists
+      (if (> debt u0)
+        ;; Calculate new ratio
+        (let ((new-ratio (/ (* new-collateral-value-usd u10000) debt)))
+          ;; Check if minimum collateralization ratio is maintained
+          (asserts! (>= new-ratio (var-get minimum-collateralization-ratio)) (err ERR_MIN_COLLATERAL_NOT_MET)))
+        true) ;; No debt means no ratio requirements
+      
+      ;; Update vault
+      (map-set vaults vault-id {
+        owner: (get owner vault),
+        collateral: new-collateral,
+        debt: debt,
+        last-update: block-height,
+        liquidated: false
+      })
+      
+      ;; In production, we would integrate with BTC bridge to return BTC to user
+      ;; For now we're just updating the record
+      
+      (ok true))))
