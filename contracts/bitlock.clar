@@ -71,3 +71,82 @@
     liquidated: bool
   }
 )
+
+;; Counter for vault IDs
+(define-data-var next-vault-id uint u1)
+
+;; Get current BTC price in USD (with 6 decimal precision)
+(define-read-only (get-btc-price)
+  (contract-call? (var-get oracle-contract) get-btc-price))
+
+;; Get current collateralization ratio of a vault
+(define-read-only (get-collateralization-ratio (vault-id uint))
+  (let (
+    (vault (unwrap! (map-get? vaults vault-id) (err ERR_VAULT_NOT_FOUND)))
+    (btc-price (unwrap! (get-btc-price) (err ERR_ORACLE_FAILURE)))
+    (collateral-value-usd (* (get collateral vault) btc-price))
+    (debt (get debt vault))
+  )
+  (if (> debt u0)
+    (ok (/ (* collateral-value-usd u10000) debt)) ;; Result as basis points
+    (ok u0))))
+
+;; Check if a vault can be liquidated
+(define-read-only (can-liquidate (vault-id uint))
+  (let (
+    (vault (unwrap! (map-get? vaults vault-id) (err ERR_VAULT_NOT_FOUND)))
+    (c-ratio (unwrap! (get-collateralization-ratio vault-id) (err ERR_ORACLE_FAILURE)))
+  )
+  (if (get liquidated vault)
+    (err ERR_ALREADY_LIQUIDATED)
+    (if (< c-ratio (var-get liquidation-ratio))
+      (ok true)
+      (ok false)))))
+
+;; Get vault info
+(define-read-only (get-vault-info (vault-id uint))
+  (map-get? vaults vault-id))
+
+;; Get total system health
+(define-read-only (get-system-health)
+  {
+    total-collateral-value: (unwrap-panic (get-total-collateral-value)),
+    total-debt: (var-get total-debt),
+    system-collateralization: (unwrap-panic (get-system-collateralization))
+  })
+
+;; Get total collateral value in USD
+(define-read-only (get-total-collateral-value)
+  (let (
+    (btc-price (unwrap! (get-btc-price) (err ERR_ORACLE_FAILURE)))
+    (total-collateral (fold + (map get-vault-collateral (get-all-vault-ids)) u0))
+  )
+  (ok (* total-collateral btc-price))))
+
+;; Get system collateralization ratio
+(define-read-only (get-system-collateralization)
+  (let (
+    (total-collateral-value (unwrap! (get-total-collateral-value) (err ERR_ORACLE_FAILURE)))
+    (total-debt (var-get total-debt))
+  )
+  (if (> total-debt u0)
+    (ok (/ (* total-collateral-value u10000) total-debt)) ;; Result as basis points
+    (ok u0))))
+
+;; Helper functions for iterating all vaults
+(define-read-only (get-all-vault-ids)
+  (let ((next-id (var-get next-vault-id)))
+    (map unwrap-panic (filter is-some (map get-vault-if-exists (list-range u1 (- next-id u1)))))))
+
+(define-read-only (get-vault-if-exists (id uint))
+  (let ((vault (map-get? vaults id)))
+    (if (is-some vault)
+      (some id)
+      none)))
+
+(define-read-only (get-vault-collateral (vault-id uint))
+  (default-to u0
+    (get collateral (default-to
+      { owner: 'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM, collateral: u0, debt: u0, last-update: u0, liquidated: false }
+      (map-get? vaults vault-id)))))
+
