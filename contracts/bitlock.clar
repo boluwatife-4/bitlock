@@ -168,7 +168,7 @@
       owner: sender,
       collateral: collateral-amount,
       debt: u0,
-      last-update: block-height,
+      last-update: stacks-block-height,
       liquidated: false
     })
     
@@ -196,7 +196,7 @@
       owner: (get owner vault),
       collateral: (+ (get collateral vault) collateral-amount),
       debt: (get debt vault),
-      last-update: block-height,
+      last-update: stacks-block-height,
       liquidated: false
     })
     
@@ -229,7 +229,7 @@
         owner: (get owner vault),
         collateral: (get collateral vault),
         debt: new-debt,
-        last-update: block-height,
+        last-update: stacks-block-height,
         liquidated: false
       })
       
@@ -260,7 +260,7 @@
       owner: (get owner vault),
       collateral: (get collateral vault),
       debt: (- debt amount),
-      last-update: block-height,
+      last-update: stacks-block-height,
       liquidated: false
     })
     
@@ -302,7 +302,7 @@
         owner: (get owner vault),
         collateral: new-collateral,
         debt: debt,
-        last-update: block-height,
+        last-update: stacks-block-height,
         liquidated: false
       })
       
@@ -345,7 +345,7 @@
         owner: (get owner vault),
         collateral: u0, ;; All collateral taken
         debt: u0,       ;; Debt cleared
-        last-update: block-height,
+        last-update: stacks-block-height,
         liquidated: true
       })
       
