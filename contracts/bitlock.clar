@@ -150,3 +150,94 @@
       { owner: 'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM, collateral: u0, debt: u0, last-update: u0, liquidated: false }
       (map-get? vaults vault-id)))))
 
+;; Create a new vault and deposit collateral
+(define-public (create-vault (collateral-amount uint))
+  (let (
+    (vault-id (var-get next-vault-id))
+    (sender tx-sender)
+  )
+    (asserts! (not (var-get system-paused)) (err ERR_SYSTEM_PAUSED))
+    (asserts! (> collateral-amount u0) (err ERR_INVALID_AMOUNT))
+    
+    ;; We would implement a BTC bridge integration here
+    ;; For now, we'll simulate locking BTC by simply recording it
+    ;; In production, this would involve a protocol like sBTC or another bridge
+    
+    ;; Create vault record
+    (map-set vaults vault-id {
+      owner: sender,
+      collateral: collateral-amount,
+      debt: u0,
+      last-update: block-height,
+      liquidated: false
+    })
+    
+    ;; Mint NFT for vault ownership
+    (try! (nft-mint? vault-token vault-id sender))
+    
+    ;; Increment vault counter
+    (var-set next-vault-id (+ vault-id u1))
+    
+    (ok vault-id)))
+
+;; Add more collateral to an existing vault
+(define-public (add-collateral (vault-id uint) (collateral-amount uint))
+  (let (
+    (vault (unwrap! (map-get? vaults vault-id) (err ERR_VAULT_NOT_FOUND)))
+    (sender tx-sender)
+  )
+    (asserts! (not (var-get system-paused)) (err ERR_SYSTEM_PAUSED))
+    (asserts! (is-eq sender (get owner vault)) (err ERR_UNAUTHORIZED))
+    (asserts! (not (get liquidated vault)) (err ERR_ALREADY_LIQUIDATED))
+    (asserts! (> collateral-amount u0) (err ERR_INVALID_AMOUNT))
+    
+    ;; Update vault with new collateral
+    (map-set vaults vault-id {
+      owner: (get owner vault),
+      collateral: (+ (get collateral vault) collateral-amount),
+      debt: (get debt vault),
+      last-update: block-height,
+      liquidated: false
+    })
+    
+    (ok true)))
+
+;; Mint stablecoin tokens against collateral
+(define-public (mint-stablecoin (vault-id uint) (amount uint))
+  (let (
+    (vault (unwrap! (map-get? vaults vault-id) (err ERR_VAULT_NOT_FOUND)))
+    (sender tx-sender)
+    (btc-price (unwrap! (get-btc-price) (err ERR_ORACLE_FAILURE)))
+    (new-debt (+ (get debt vault) amount))
+    (collateral-value-usd (* (get collateral vault) btc-price))
+  )
+    (asserts! (not (var-get system-paused)) (err ERR_SYSTEM_PAUSED))
+    (asserts! (is-eq sender (get owner vault)) (err ERR_UNAUTHORIZED))
+    (asserts! (not (get liquidated vault)) (err ERR_ALREADY_LIQUIDATED))
+    (asserts! (> amount u0) (err ERR_INVALID_AMOUNT))
+    
+    ;; Check if debt ceiling would be exceeded
+    (asserts! (<= (+ (var-get total-debt) amount) (var-get debt-ceiling)) (err ERR_EXCEEDS_DEBT_CEILING))
+    
+    ;; Calculate new collateralization ratio
+    (let ((new-ratio (/ (* collateral-value-usd u10000) new-debt)))
+      ;; Check if minimum collateralization ratio is maintained
+      (asserts! (>= new-ratio (var-get minimum-collateralization-ratio)) (err ERR_MIN_COLLATERAL_NOT_MET))
+      
+      ;; Update vault info
+      (map-set vaults vault-id {
+        owner: (get owner vault),
+        collateral: (get collateral vault),
+        debt: new-debt,
+        last-update: block-height,
+        liquidated: false
+      })
+      
+      ;; Update total debt
+      (var-set total-debt (+ (var-get total-debt) amount))
+      
+      ;; Mint stablecoins to sender
+      (try! (ft-mint? usda amount sender))
+      
+      (ok true))))
+
