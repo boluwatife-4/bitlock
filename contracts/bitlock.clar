@@ -385,3 +385,78 @@
     (map-delete vaults vault-id)
     
     (ok { collateral-returned: collateral, debt-repaid: debt })))
+
+;; Direct stablecoin redemption for BTC (at a fee)
+(define-public (redeem-stablecoin-for-btc (amount uint))
+  (let (
+    (sender tx-sender)
+    (btc-price (unwrap! (get-btc-price) (err ERR_ORACLE_FAILURE)))
+    (fee-amount (/ (* amount (var-get protocol-fee-percentage)) u1000))
+    (net-amount (- amount fee-amount))
+    (btc-amount (/ (* net-amount u100000000) btc-price))  ;; Convert to satoshis
+  )
+    (asserts! (not (var-get system-paused)) (err ERR_SYSTEM_PAUSED))
+    (asserts! (> amount u0) (err ERR_INVALID_AMOUNT))
+    (asserts! (<= amount (var-get total-debt)) (err ERR_INVALID_REDEMPTION))
+    
+    ;; Burn stablecoins from sender
+    (try! (ft-burn? usda amount sender))
+    
+    ;; In production, we would integrate with a BTC bridge
+    ;; to transfer BTC to the user
+    
+    ;; Update total debt
+    (var-set total-debt (- (var-get total-debt) amount))
+    
+    (ok { redeemed-amount: net-amount, btc-amount: btc-amount, fee-paid: fee-amount })))
+
+;; Governance functions
+
+;; Update liquidation ratio (only callable by governance)
+(define-public (update-liquidation-ratio (new-ratio uint))
+  (begin
+    (asserts! (is-contract-caller (var-get governance-token-contract)) (err ERR_UNAUTHORIZED))
+    (var-set liquidation-ratio new-ratio)
+    (ok true)))
+
+;; Update minimum collateralization ratio (only callable by governance)
+(define-public (update-min-collateralization-ratio (new-ratio uint))
+  (begin
+    (asserts! (is-contract-caller (var-get governance-token-contract)) (err ERR_UNAUTHORIZED))
+    (var-set minimum-collateralization-ratio new-ratio)
+    (ok true)))
+
+;; Update stability fee (only callable by governance)
+(define-public (update-stability-fee (new-fee uint))
+  (begin
+    (asserts! (is-contract-caller (var-get governance-token-contract)) (err ERR_UNAUTHORIZED))
+    (var-set stability-fee new-fee)
+    (ok true)))
+
+;; Update liquidation penalty (only callable by governance)
+(define-public (update-liquidation-penalty (new-penalty uint))
+  (begin
+    (asserts! (is-contract-caller (var-get governance-token-contract)) (err ERR_UNAUTHORIZED))
+    (var-set liquidation-penalty new-penalty)
+    (ok true)))
+
+;; Update debt ceiling (only callable by governance)
+(define-public (update-debt-ceiling (new-ceiling uint))
+  (begin
+    (asserts! (is-contract-caller (var-get governance-token-contract)) (err ERR_UNAUTHORIZED))
+    (var-set debt-ceiling new-ceiling)
+    (ok true)))
+
+;; Update protocol fee percentage (only callable by governance)
+(define-public (update-protocol-fee-percentage (new-fee uint))
+  (begin
+    (asserts! (is-contract-caller (var-get governance-token-contract)) (err ERR_UNAUTHORIZED))
+    (var-set protocol-fee-percentage new-fee)
+    (ok true)))
+
+;; Emergency pause function (only callable by governance)
+(define-public (set-pause-state (paused bool))
+  (begin
+    (asserts! (is-contract-caller (var-get governance-token-contract)) (err ERR_UNAUTHORIZED))
+    (var-set system-paused paused)
+    (ok true)))
