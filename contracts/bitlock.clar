@@ -460,3 +460,30 @@
     (asserts! (is-contract-caller (var-get governance-token-contract)) (err ERR_UNAUTHORIZED))
     (var-set system-paused paused)
     (ok true)))
+
+;; Update oracle contract (only callable by governance)
+(define-public (update-oracle-contract (new-oracle principal))
+  (begin
+    (asserts! (is-contract-caller (var-get governance-token-contract)) (err ERR_UNAUTHORIZED))
+    (var-set oracle-contract new-oracle)
+    (ok true)))
+
+;; Update governance contract (only callable by current governance)
+(define-public (update-governance-contract (new-governance principal))
+  (begin
+    (asserts! (is-contract-caller (var-get governance-token-contract)) (err ERR_UNAUTHORIZED))
+    (var-set governance-token-contract new-governance)
+    (ok true)))
+
+;; SIP-010 token function implementations
+(define-public (transfer (amount uint) (sender principal) (recipient principal) (memo (optional (buff 34))))
+  (begin
+    (asserts! (is-eq tx-sender sender) (err ERR_UNAUTHORIZED))
+    (ft-transfer? usda amount sender recipient)))
+
+(define-read-only (get-balance (owner principal))
+  (ok (ft-get-balance usda owner)))
+
+;; Helper function to check if caller is the specified contract
+(define-read-only (is-contract-caller (contract principal))
+  (is-eq contract contract-caller))
