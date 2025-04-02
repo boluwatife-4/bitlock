@@ -310,3 +310,78 @@
       ;; For now we're just updating the record
       
       (ok true))))
+
+;; Liquidate an undercollateralized vault
+(define-public (liquidate-vault (vault-id uint))
+  (let (
+    (vault (unwrap! (map-get? vaults vault-id) (err ERR_VAULT_NOT_FOUND)))
+    (liquidatable (unwrap! (can-liquidate vault-id) (err ERR_HEALTHY_VAULT)))
+    (collateral (get collateral vault))
+    (debt (get debt vault))
+    (btc-price (unwrap! (get-btc-price) (err ERR_ORACLE_FAILURE)))
+    (liquidator tx-sender)
+  )
+    (asserts! (not (var-get system-paused)) (err ERR_SYSTEM_PAUSED))
+    (asserts! liquidatable (err ERR_HEALTHY_VAULT))
+    
+    ;; Verify liquidator has enough stablecoins to cover the debt
+    (asserts! (>= (ft-get-balance usda liquidator) debt) (err ERR_INSUFFICIENT_STABLECOIN_BALANCE))
+    
+    ;; Calculate liquidation values
+    (let (
+      (penalty (/ (* debt (var-get liquidation-penalty)) u1000)) ;; Liquidation penalty
+      (total-to-repay (+ debt penalty))
+      (collateral-value-usd (* collateral btc-price))
+    )
+      ;; Burn stablecoins from liquidator to cover the debt
+      (try! (ft-burn? usda debt liquidator))
+      
+      ;; Transfer collateral to liquidator
+      ;; In production, we would use a BTC bridge to transfer BTC
+      ;; Here we're just simulating the transfer
+      
+      ;; Mark vault as liquidated
+      (map-set vaults vault-id {
+        owner: (get owner vault),
+        collateral: u0, ;; All collateral taken
+        debt: u0,       ;; Debt cleared
+        last-update: block-height,
+        liquidated: true
+      })
+      
+      ;; Update total debt
+      (var-set total-debt (- (var-get total-debt) debt))
+      
+      (ok { collateral-seized: collateral, debt-repaid: debt }))))
+
+;; Close a vault (repay all debt and withdraw all collateral)
+(define-public (close-vault (vault-id uint))
+  (let (
+    (vault (unwrap! (map-get? vaults vault-id) (err ERR_VAULT_NOT_FOUND)))
+    (sender tx-sender)
+    (debt (get debt vault))
+    (collateral (get collateral vault))
+  )
+    (asserts! (is-eq sender (get owner vault)) (err ERR_UNAUTHORIZED))
+    (asserts! (not (get liquidated vault)) (err ERR_ALREADY_LIQUIDATED))
+    
+    ;; First repay all debt if any
+    (if (> debt u0)
+      (begin
+        ;; Burn stablecoins from sender
+        (try! (ft-burn? usda debt sender))
+        
+        ;; Update total debt
+        (var-set total-debt (- (var-get total-debt) debt)))
+      true) ;; No debt to repay
+    
+    ;; Transfer collateral back to user
+    ;; In production, we would use a BTC bridge
+    
+    ;; Burn the vault NFT
+    (try! (nft-burn? vault-token vault-id sender))
+    
+    ;; Delete vault record
+    (map-delete vaults vault-id)
+    
+    (ok { collateral-returned: collateral, debt-repaid: debt })))
